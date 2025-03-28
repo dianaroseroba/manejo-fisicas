@@ -1,197 +1,164 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import GUI from 'lil-gui';
 import * as CANNON from 'cannon-es';
-import popSound from '/assets/collision.mp3';
 
 const ManejoFisicas = () => {
     const mountRef = useRef(null);
-    const [roofEnabled, setRoofEnabled] = useState(false);
-    const [soundEnabled, setSoundEnabled] = useState(true);
-    const [carModel, setCarModel] = useState('car1.glb');
-    const [lightsEnabled, setLightsEnabled] = useState(true);
+    const [limitesActivos, setLimitesActivos] = useState(true);
+    const audioRef = useRef(new Audio('assets/collision.mp3'));
 
     useEffect(() => {
         if (!mountRef.current) return;
 
-        // Escena y mundo físico
+        const gui = new GUI();
         const scene = new THREE.Scene();
         const world = new CANNON.World();
         world.gravity.set(0, -9.82, 0);
 
+        const limites = { x: 5, z: 5, y: 3 };
+
+        // Piso
+        const floorShape = new CANNON.Plane();
+        const floorBody = new CANNON.Body({ mass: 0 });
+        floorBody.addShape(floorShape);
+        floorBody.quaternion.setFromAxisAngle(new CANNON.Vec3(-1, 0, 0), Math.PI * 0.5);
+        world.addBody(floorBody);
+
+        const floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(10, 10),
+            new THREE.MeshStandardMaterial({ color: '#777777', metalness: 0.3, roughness: 0.4 })
+        );
+        floor.receiveShadow = true;
+        floor.rotation.x = -Math.PI * 0.5;
+        scene.add(floor);
+
+        // Vehículo
+        const carShape = new CANNON.Box(new CANNON.Vec3(1, 0.5, 2));
+        const carBody = new CANNON.Body({ mass: 2, position: new CANNON.Vec3(0, 1, 0) });
+        carBody.addShape(carShape);
+        world.addBody(carBody);
+
+        const car = new THREE.Mesh(
+            new THREE.BoxGeometry(2, 1, 4),
+            new THREE.MeshStandardMaterial({ color: 'red' })
+        );
+        car.castShadow = true;
+        scene.add(car);
+
+        // Esfera
+        const sphereShape = new CANNON.Sphere(0.5);
+        const sphereBody = new CANNON.Body({ mass: 1, position: new CANNON.Vec3(2, 1, 0) });
+        sphereBody.addShape(sphereShape);
+        world.addBody(sphereBody);
+
+        const sphere = new THREE.Mesh(
+            new THREE.SphereGeometry(0.5, 32, 32),
+            new THREE.MeshStandardMaterial({ color: 'green' })
+        );
+        sphere.castShadow = true;
+        scene.add(sphere);
+
+        // Cubo de límite
+        const limitBox = new THREE.Mesh(
+            new THREE.BoxGeometry(limites.x * 2, limites.y * 2, limites.z * 2),
+            new THREE.MeshStandardMaterial({ color: 'blue', transparent: true, opacity: 0.2, wireframe: true })
+        );
+        limitBox.position.y = limites.y;
+        scene.add(limitBox);
+
+        // Luces del vehículo
+        const headlight1 = new THREE.PointLight(0xffffff, 2, 5);
+        const headlight2 = new THREE.PointLight(0xffffff, 2, 5);
+        scene.add(headlight1, headlight2);
+
+        // Iluminación ambiental
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        directionalLight.position.set(5, 5, 5);
+        scene.add(directionalLight);
+
+        const sizes = { width: window.innerWidth, height: window.innerHeight };
+        const camera = new THREE.PerspectiveCamera(75, sizes.width / sizes.height, 0.1, 100);
+        camera.position.set(-5, 5, 10);
+        scene.add(camera);
+
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.shadowMap.enabled = true;
-        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setSize(sizes.width, sizes.height);
         mountRef.current.appendChild(renderer.domElement);
-
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-        camera.position.set(-6, 6, 6);
-        scene.add(camera);
 
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
 
-        // Luces
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-        scene.add(ambientLight);
+        const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+        window.addEventListener('keydown', (e) => keys[e.code] = true);
+        window.addEventListener('keyup', (e) => keys[e.code] = false);
 
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-        directionalLight.position.set(5, 10, 5);
-        directionalLight.castShadow = true;
-        scene.add(directionalLight);
+        const clock = new THREE.Clock();
+        let oldElapsedTime = 0;
 
-        const pointLight = new THREE.PointLight(0xffaa33, 1, 10);
-        pointLight.position.set(0, 3, 0);
-        scene.add(pointLight);
-
-        const toggleLights = (enabled) => {
-            ambientLight.intensity = enabled ? 0.5 : 0;
-            directionalLight.intensity = enabled ? 1 : 0;
-            pointLight.intensity = enabled ? 1 : 0;
-        };
-        toggleLights(lightsEnabled);
-
-        // Piso azul
-        const floor = new THREE.Mesh(
-            new THREE.PlaneGeometry(20, 20),
-            new THREE.MeshStandardMaterial({ color: 'blue', metalness: 0.5, roughness: 0.5 })
-        );
-        floor.rotation.x = -Math.PI * 0.5;
-        scene.add(floor);
-
-        const floorBody = new CANNON.Body({ mass: 0 });
-        floorBody.addShape(new CANNON.Plane());
-        floorBody.quaternion.setFromAxisAngle(new CANNON.Vec3(-1, 0, 0), Math.PI * 0.5);
-        world.addBody(floorBody);
-
-        // Carro: carga del modelo visual (inicia en reposo junto al cubo)
-        let carMesh;
-        const loader = new GLTFLoader();
-        loader.load(`/assets/${carModel}`, (gltf) => {
-            carMesh = gltf.scene;
-            carMesh.position.set(0.75, 1, 0);  // Nueva posición más cercana al cubo
-            carMesh.scale.set(1, 1, 1);
-            scene.add(carMesh);
-        });
-
-        // Carro: parámetros del cuerpo físico
-        // Carro: parámetros del cuerpo físico
-        const carBody = new CANNON.Body({ mass: 2, position: new CANNON.Vec3(0.75, 1, 0) });
-        carBody.addShape(new CANNON.Box(new CANNON.Vec3(0.75, 0.5, 1.5)));
-        // Caja proporcional al modelo del carro (dimensiones completas 1.5 x 1 x 3)
-        carBody.addShape(new CANNON.Box(new CANNON.Vec3(0.75, 0.5, 1.5)));
-        carBody.fixedRotation = true;
-        carBody.updateMassProperties();
-        // Inicia en reposo
-        carBody.velocity.set(0, 0, 0);
-        world.addBody(carBody);
-
-        // Cubo: parámetros del cuerpo físico (masa 2 y forma 1x1x1)
-        const boxBody = new CANNON.Body({ mass: 2, position: new CANNON.Vec3(0, 1, 0) });
-        boxBody.addShape(new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)));
-        world.addBody(boxBody);
-
-        const boxMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(1, 1, 1),
-            new THREE.MeshStandardMaterial({ color: 'red' })
-        );
-        scene.add(boxMesh);
-
-        // Sonido de colisión
-        const collisionSound = new Audio(popSound);
-        collisionSound.volume = 0.5;
-        carBody.addEventListener('collide', () => {
-            if (soundEnabled) {
-                collisionSound.currentTime = 0;
-                collisionSound.play().catch(err => console.error('Sound error:', err));
-            }
-        });
-
-        // Estado de teclas para el control horizontal
-        const keys = {
-            ArrowUp: false,
-            ArrowDown: false,
-            ArrowLeft: false,
-            ArrowRight: false
-        };
-
-        const onKeyDown = (e) => {
-            if (Object.prototype.hasOwnProperty.call(keys, e.key)) {
-                keys[e.key] = true;
-            }
-        };
-
-        const onKeyUp = (e) => {
-            if (Object.prototype.hasOwnProperty.call(keys, e.key)) {
-                keys[e.key] = false;
-            }
-        };
-
-        window.addEventListener('keydown', onKeyDown);
-        window.addEventListener('keyup', onKeyUp);
-
-        // Ciclo de animación: movimiento horizontal
         const tick = () => {
-            const speed = 5;
-            let vx = 0, vz = 0;
-            if (keys.ArrowUp) vz -= speed;
-            if (keys.ArrowDown) vz += speed;
-            if (keys.ArrowLeft) vx -= speed;
-            if (keys.ArrowRight) vx += speed;
-            
-            carBody.velocity.x = vx;
-            carBody.velocity.z = vz;
-            
-            // Forzar movimiento horizontal: se mantiene la misma altura (y = 1)
-            carBody.position.y = 1;
-            carBody.velocity.y = 0;
-        
-            world.step(1 / 60);
-        
-            if (carMesh) {
-                carMesh.position.copy(carBody.position);
-                carMesh.quaternion.copy(carBody.quaternion);
+            const elapsedTime = clock.getElapsedTime();
+            const deltaTime = elapsedTime - oldElapsedTime;
+            oldElapsedTime = elapsedTime;
+
+            world.step(1 / 60, deltaTime, 3);
+
+            if (keys.ArrowUp) carBody.position.z -= 0.1;
+            if (keys.ArrowDown) carBody.position.z += 0.1;
+            if (keys.ArrowLeft) carBody.position.x -= 0.1;
+            if (keys.ArrowRight) carBody.position.x += 0.1;
+
+            if (limitesActivos) {
+                carBody.position.x = Math.max(-limites.x, Math.min(limites.x, carBody.position.x));
+                carBody.position.z = Math.max(-limites.z, Math.min(limites.z, carBody.position.z));
+                carBody.position.y = Math.min(limites.y, carBody.position.y);
+                sphereBody.position.x = Math.max(-limites.x, Math.min(limites.x, sphereBody.position.x));
+                sphereBody.position.z = Math.max(-limites.z, Math.min(limites.z, sphereBody.position.z));
+                sphereBody.position.y = Math.min(limites.y, sphereBody.position.y);
+                limitBox.visible = true;
+            } else {
+                limitBox.visible = false;
             }
-        
-            // Hacer que el cubo siga al carro
-            boxBody.position.copy(carBody.position);
-            boxBody.quaternion.copy(carBody.quaternion);
-        
-            boxMesh.position.copy(boxBody.position);
-            boxMesh.quaternion.copy(boxBody.quaternion);
-        
+
+            car.position.copy(carBody.position);
+            car.quaternion.copy(carBody.quaternion);
+            sphere.position.copy(sphereBody.position);
+            sphere.quaternion.copy(sphereBody.quaternion);
+
+            headlight1.position.set(car.position.x - 0.8, car.position.y + 0.5, car.position.z + 2);
+            headlight2.position.set(car.position.x + 0.8, car.position.y + 0.5, car.position.z + 2);
+
             controls.update();
             renderer.render(scene, camera);
             requestAnimationFrame(tick);
         };
-        
-
         tick();
 
         return () => {
-            window.removeEventListener('keydown', onKeyDown);
-            window.removeEventListener('keyup', onKeyUp);
+            gui.destroy();
             mountRef.current.removeChild(renderer.domElement);
         };
-    }, [roofEnabled, soundEnabled, carModel, lightsEnabled]);
+    }, [limitesActivos]);
+
+    const reproducirSonido = () => {
+        if (audioRef.current) {
+            audioRef.current.currentTime = 0;
+            audioRef.current.play();
+        }
+    };
 
     return (
         <div>
-            <button onClick={() => setRoofEnabled(!roofEnabled)}>
-                {roofEnabled ? 'Disable Roof' : 'Enable Roof'}
+            <button onClick={() => setLimitesActivos(!limitesActivos)}>
+                {limitesActivos ? 'Desactivar Límites' : 'Activar Límites'}
             </button>
-            <button onClick={() => setSoundEnabled(!soundEnabled)}>
-                {soundEnabled ? 'Disable Sound' : 'Enable Sound'}
-            </button>
-            <button onClick={() => setLightsEnabled(!lightsEnabled)}>
-                {lightsEnabled ? 'Turn Off Lights' : 'Turn On Lights'}
-            </button>
-            <select onChange={(e) => setCarModel(e.target.value)}>
-                <option value="car1.glb">Car Model 1</option>
-                <option value="car2.glb">Car Model 2</option>
-            </select>
-            <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
+            <button onClick={reproducirSonido}>Reproducir sonido</button>
+            <div ref={mountRef} />
         </div>
     );
 };
